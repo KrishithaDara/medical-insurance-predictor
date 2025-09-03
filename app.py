@@ -3,12 +3,14 @@ import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score, mean_squared_error
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import warnings
+warnings.filterwarnings('ignore')
 
 # Page configuration
 st.set_page_config(
@@ -26,521 +28,608 @@ st.markdown("""
     color: #1f77b4;
     text-align: center;
     margin-bottom: 2rem;
+    font-weight: bold;
 }
 .sub-header {
     font-size: 1.5rem;
     color: #2c3e50;
     margin: 1rem 0;
+    font-weight: bold;
 }
 .metric-card {
     background-color: #f8f9fa;
-    padding: 1rem;
-    border-radius: 10px;
+    padding: 1.5rem;
+    border-radius: 15px;
     border-left: 5px solid #1f77b4;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    margin: 1rem 0;
 }
 .info-box {
     background-color: #e3f2fd;
-    padding: 1rem;
-    border-radius: 10px;
+    padding: 1.5rem;
+    border-radius: 15px;
     border-left: 5px solid #2196f3;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 .warning-box {
     background-color: #fff3e0;
+    padding: 1.5rem;
+    border-radius: 15px;
+    border-left: 5px solid #ff9800;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.success-box {
+    background-color: #e8f5e8;
+    padding: 1.5rem;
+    border-radius: 15px;
+    border-left: 5px solid #4caf50;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.sidebar-info {
+    background-color: #f0f2f6;
     padding: 1rem;
     border-radius: 10px;
-    border-left: 5px solid #ff9800;
+    margin: 1rem 0;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# Title and Introduction
-st.markdown('<h1 class="main-header">🏥 Medical Insurance Cost Predictor</h1>', unsafe_allow_html=True)
-st.markdown("""
-<div class="info-box">
-<h3>🎯 What does this app do?</h3>
-<p>This AI-powered application predicts your annual medical insurance costs based on your personal health profile. 
-It uses advanced machine learning algorithms trained on real insurance data to provide accurate cost estimates.</p>
-</div>
-""", unsafe_allow_html=True)
-
-# Create realistic dataset matching your original methodology
+# Load and process data from CSV
 @st.cache_data
-def load_and_process_data():
-    """Create realistic insurance dataset following your original preprocessing steps"""
-    np.random.seed(42)
-    n_samples = 1338  # Similar to typical insurance datasets
-    
-    # Generate features following realistic distributions
-    ages = np.random.randint(18, 65, n_samples)
-    sexes = np.random.choice(['male', 'female'], n_samples, p=[0.51, 0.49])
-    bmis = np.random.normal(30.5, 6.0, n_samples)
-    bmis = np.clip(bmis, 15.96, 53.13)  # Realistic BMI range
-    children_counts = np.random.choice([0, 1, 2, 3, 4, 5], n_samples, p=[0.43, 0.24, 0.18, 0.12, 0.02, 0.01])
-    smokers = np.random.choice(['yes', 'no'], n_samples, p=[0.20, 0.80])
-    regions = np.random.choice(['northeast', 'northwest', 'southeast', 'southwest'], n_samples)
-    
-    # Generate realistic expenses based on your analysis
-    expenses = []
-    for i in range(n_samples):
-        base_cost = 3000
+def load_insurance_data():
+    """Load and preprocess the insurance dataset from CSV"""
+    try:
+        # Try to load the CSV file
+        data = pd.read_csv('med-insurance.csv')
         
-        # Age factor (linear relationship)
-        base_cost += ages[i] * 50
+        # Display basic info about the loaded data
+        st.sidebar.success(f"✅ Data loaded: {len(data)} records")
         
-        # BMI factor (higher for BMI > 30)
-        if bmis[i] > 30:
-            base_cost += (bmis[i] - 30) * 200
-        elif bmis[i] < 18.5:
-            base_cost += (18.5 - bmis[i]) * 150
-            
-        # Children factor
-        base_cost += children_counts[i] * 1200
+        # Basic data cleaning
+        data = data.dropna()  # Remove any missing values
         
-        # Smoking factor (major impact)
-        if smokers[i] == 'yes':
-            base_cost *= 2.3
+        # Ensure proper column names (handle different naming conventions)
+        expected_columns = ['age', 'sex', 'bmi', 'children', 'smoker', 'region', 'charges']
+        
+        # Check if we have 'charges' or 'expenses' column
+        if 'charges' in data.columns and 'expenses' not in data.columns:
+            data = data.rename(columns={'charges': 'expenses'})
+        elif 'expenses' not in data.columns and 'charges' not in data.columns:
+            st.error("❌ CSV must contain a 'charges' or 'expenses' column")
+            return None
             
-        # Sex factor (males slightly higher)
-        if sexes[i] == 'male':
-            base_cost *= 1.08
-            
-        # Regional factor (Southeast higher)
-        if regions[i] == 'southeast':
-            base_cost *= 1.15
-        elif regions[i] == 'southwest':
-            base_cost *= 1.05
-            
-        # Add realistic noise
-        base_cost += np.random.normal(0, 1500)
-        expenses.append(max(1121.87, base_cost))  # Minimum realistic cost
-    
-    # Create DataFrame
-    data = pd.DataFrame({
-        'age': ages,
-        'sex': sexes,
-        'bmi': bmis,
-        'children': children_counts,
-        'smoker': smokers,
-        'region': regions,
-        'expenses': expenses
-    })
-    
-    # Apply your original preprocessing
-    # Cap children values as in your analysis
-    data['children'] = data['children'].replace([4, 5], [3, 3])
-    
-    # Encoding following your methodology
-    data['sex'] = data['sex'].replace({'male': 2, 'female': 1})
-    data['smoker'] = data['smoker'].replace({'yes': 2, 'no': 1})
-    data['region'] = data['region'].replace({
-        'southeast': 2, 'southwest': 1, 
-        'northeast': 1, 'northwest': 1
-    })
-    
-    return data
+        return data
+        
+    except FileNotFoundError:
+        st.error("❌ File 'med-insurance.csv' not found. Please upload the file to the same directory as this app.")
+        return None
+    except Exception as e:
+        st.error(f"❌ Error loading data: {str(e)}")
+        return None
 
-# Train models following your exact methodology
+# Preprocess data for machine learning
+@st.cache_data
+def preprocess_data(data):
+    """Preprocess the insurance data for ML models"""
+    if data is None:
+        return None, None, None
+    
+    # Create a copy for processing
+    processed_data = data.copy()
+    
+    # Initialize label encoders
+    label_encoders = {}
+    
+    # Encode categorical variables
+    categorical_columns = ['sex', 'smoker', 'region']
+    for col in categorical_columns:
+        if col in processed_data.columns:
+            le = LabelEncoder()
+            processed_data[col + '_encoded'] = le.fit_transform(processed_data[col])
+            label_encoders[col] = le
+    
+    # Create feature columns for ML
+    feature_columns = ['age', 'bmi', 'children']
+    for col in categorical_columns:
+        if col in processed_data.columns:
+            feature_columns.append(col + '_encoded')
+    
+    # Prepare features and target
+    X = processed_data[feature_columns]
+    y = processed_data['expenses']
+    
+    return X, y, label_encoders
+
+# Train multiple ML models
 @st.cache_resource
-def train_models():
-    """Train models using your exact methodology"""
-    data = load_and_process_data()
+def train_models(X, y):
+    """Train multiple ML models and return results"""
+    if X is None or y is None:
+        return None, None
     
-    # Separate features and target
-    y = data['expenses']
-    X = data.drop(['expenses'], axis=1)
+    # Split the data
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     
-    # Train-test split (same as your code)
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=0)
+    # Scale the features
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
     
-    # Standardization (same as your code)
-    sc = StandardScaler()
-    X_train_scaled = sc.fit_transform(X_train)
-    X_test_scaled = sc.transform(X_test)
+    # Train models
+    models = {}
+    results = {}
     
-    # Train your three models
-    # 1. Linear Regression
-    model1 = LinearRegression()
-    model1.fit(X_train_scaled, y_train)
-    y_pred1 = model1.predict(X_test_scaled)
-    r2_1 = r2_score(y_test, y_pred1)
-    rmse_1 = np.sqrt(mean_squared_error(y_test, y_pred1))
-    
-    # 2. Random Forest
-    model2 = RandomForestRegressor(random_state=0)
-    model2.fit(X_train_scaled, y_train)
-    y_pred2 = model2.predict(X_test_scaled)
-    r2_2 = r2_score(y_test, y_pred2)
-    rmse_2 = np.sqrt(mean_squared_error(y_test, y_pred2))
-    
-    # 3. Gradient Boosting (your best model)
-    model3 = GradientBoostingRegressor(random_state=0)
-    model3.fit(X_train_scaled, y_train)
-    y_pred3 = model3.predict(X_test_scaled)
-    r2_3 = r2_score(y_test, y_pred3)
-    rmse_3 = np.sqrt(mean_squared_error(y_test, y_pred3))
-    
-    # Weighted average model (your final approach)
-    weight_avg_pred = 0.2*y_pred1 + 0.3*y_pred2 + 0.5*y_pred3
-    r2_weighted = r2_score(y_test, weight_avg_pred)
-    rmse_weighted = np.sqrt(mean_squared_error(y_test, weight_avg_pred))
-    
-    model_results = {
-        'Linear Regression': {'r2': r2_1, 'rmse': rmse_1, 'model': model1},
-        'Random Forest': {'r2': r2_2, 'rmse': rmse_2, 'model': model2},
-        'Gradient Boosting': {'r2': r2_3, 'rmse': rmse_3, 'model': model3},
-        'Weighted Average': {'r2': r2_weighted, 'rmse': rmse_weighted, 'models': [model1, model2, model3]}
+    # Linear Regression
+    lr_model = LinearRegression()
+    lr_model.fit(X_train_scaled, y_train)
+    lr_pred = lr_model.predict(X_test_scaled)
+    models['Linear Regression'] = lr_model
+    results['Linear Regression'] = {
+        'r2': r2_score(y_test, lr_pred),
+        'rmse': np.sqrt(mean_squared_error(y_test, lr_pred)),
+        'predictions': lr_pred
     }
     
-    return model_results, sc, data
+    # Random Forest
+    rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
+    rf_model.fit(X_train_scaled, y_train)
+    rf_pred = rf_model.predict(X_test_scaled)
+    models['Random Forest'] = rf_model
+    results['Random Forest'] = {
+        'r2': r2_score(y_test, rf_pred),
+        'rmse': np.sqrt(mean_squared_error(y_test, rf_pred)),
+        'predictions': rf_pred
+    }
+    
+    # Gradient Boosting
+    gb_model = GradientBoostingRegressor(n_estimators=100, random_state=42)
+    gb_model.fit(X_train_scaled, y_train)
+    gb_pred = gb_model.predict(X_test_scaled)
+    models['Gradient Boosting'] = gb_model
+    results['Gradient Boosting'] = {
+        'r2': r2_score(y_test, gb_pred),
+        'rmse': np.sqrt(mean_squared_error(y_test, gb_pred)),
+        'predictions': gb_pred
+    }
+    
+    # Ensemble (weighted average)
+    ensemble_pred = 0.3 * lr_pred + 0.3 * rf_pred + 0.4 * gb_pred
+    results['Ensemble'] = {
+        'r2': r2_score(y_test, ensemble_pred),
+        'rmse': np.sqrt(mean_squared_error(y_test, ensemble_pred)),
+        'predictions': ensemble_pred
+    }
+    
+    # Find best model
+    best_model_name = max(results.keys(), key=lambda x: results[x]['r2'])
+    
+    return {
+        'models': models,
+        'results': results,
+        'scaler': scaler,
+        'best_model': best_model_name,
+        'test_data': (X_test, y_test)
+    }, scaler
 
-# Load models and data
-with st.spinner('🤖 Loading AI models and data...'):
-    model_results, scaler, original_data = train_models()
+# BMI category function
+def get_bmi_category(bmi):
+    """Get BMI category and color"""
+    if bmi < 18.5:
+        return "Underweight", "blue"
+    elif 18.5 <= bmi < 25:
+        return "Normal weight", "green"
+    elif 25 <= bmi < 30:
+        return "Overweight", "orange"
+    else:
+        return "Obese", "red"
 
-# Sidebar for user inputs
-st.sidebar.markdown('<h2 style="color: #1f77b4;">📝 Enter Your Information</h2>', unsafe_allow_html=True)
-
-st.sidebar.markdown("### Personal Details")
-age = st.sidebar.slider("🎂 Age", 18, 65, 30, help="Your current age in years")
-sex = st.sidebar.selectbox("👤 Sex", ["Female", "Male"], help="Biological sex")
-
-st.sidebar.markdown("### Health Information")
-bmi = st.sidebar.slider("⚖️ BMI (Body Mass Index)", 15.0, 50.0, 25.0, 0.1, 
-                       help="BMI = weight(kg) / height(m)²")
-smoker = st.sidebar.selectbox("🚭 Do you smoke?", ["No", "Yes"], 
-                             help="Current smoking status")
-
-st.sidebar.markdown("### Family & Location")
-children = st.sidebar.selectbox("👶 Number of Children", [0, 1, 2, 3, 4, 5],
-                               help="Number of dependent children")
-region = st.sidebar.selectbox("🌎 Region", ["Northeast", "Northwest", "Southeast", "Southwest"],
-                             help="Your geographical region")
-
-# BMI interpretation
-if bmi < 18.5:
-    bmi_category = "Underweight"
-    bmi_color = "blue"
-elif 18.5 <= bmi < 25:
-    bmi_category = "Normal weight"
-    bmi_color = "green"
-elif 25 <= bmi < 30:
-    bmi_category = "Overweight"
-    bmi_color = "orange"
-else:
-    bmi_category = "Obese"
-    bmi_color = "red"
-
-st.sidebar.markdown(f"**BMI Category:** :{bmi_color}[{bmi_category}]")
-
-# Main content area
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    # Convert user inputs to model format (following your encoding)
-    sex_encoded = 2 if sex == "Male" else 1
-    smoker_encoded = 2 if smoker == "Yes" else 1
-    region_map = {"Northeast": 1, "Northwest": 1, "Southeast": 2, "Southwest": 1}
-    region_encoded = region_map[region]
-    children_capped = min(children, 3)  # Cap as per your methodology
+# Main app
+def main():
+    # Title and Introduction
+    st.markdown('<h1 class="main-header">🏥 Medical Insurance Cost Predictor</h1>', unsafe_allow_html=True)
     
-    # Make prediction using weighted average model (your best approach)
-    user_input = np.array([[age, sex_encoded, bmi, children_capped, smoker_encoded, region_encoded]])
-    user_input_scaled = scaler.transform(user_input)
-    
-    # Get predictions from all models
-    pred1 = model_results['Linear Regression']['model'].predict(user_input_scaled)[0]
-    pred2 = model_results['Random Forest']['model'].predict(user_input_scaled)[0]
-    pred3 = model_results['Gradient Boosting']['model'].predict(user_input_scaled)[0]
-    
-    # Weighted average prediction (your final method)
-    final_prediction = 0.2*pred1 + 0.3*pred2 + 0.5*pred3
-    
-    # Display main prediction
-    st.markdown('<h2 class="sub-header">🎯 Your Insurance Cost Prediction</h2>', unsafe_allow_html=True)
-    
-    prediction_cols = st.columns(4)
-    
-    with prediction_cols[0]:
-        st.metric(
-            label="💰 Annual Cost", 
-            value=f"${final_prediction:,.0f}",
-            help="Predicted annual insurance premium"
-        )
-    
-    with prediction_cols[1]:
-        avg_cost = original_data['expenses'].mean()
-        diff = final_prediction - avg_cost
-        st.metric(
-            label="📊 vs Average", 
-            value=f"${avg_cost:,.0f}", 
-            delta=f"{diff:+,.0f}",
-            help="Comparison with average cost"
-        )
-    
-    with prediction_cols[2]:
-        monthly_cost = final_prediction / 12
-        st.metric(
-            label="📅 Monthly Cost", 
-            value=f"${monthly_cost:,.0f}",
-            help="Estimated monthly premium"
-        )
-    
-    with prediction_cols[3]:
-        daily_cost = final_prediction / 365
-        st.metric(
-            label="📆 Daily Cost", 
-            value=f"${daily_cost:.2f}",
-            help="Cost per day"
-        )
-
-with col2:
-    st.markdown('<h3 class="sub-header">🤖 Model Performance</h3>', unsafe_allow_html=True)
-    
-    # Display best model performance
-    best_r2 = model_results['Weighted Average']['r2']
-    best_rmse = model_results['Weighted Average']['rmse']
-    
-    st.markdown(f"""
-    <div class="metric-card">
-    <h4>🏆 Best Model: Weighted Average</h4>
-    <p><strong>Accuracy (R²):</strong> {best_r2:.3f}</p>
-    <p><strong>Error (RMSE):</strong> ${best_rmse:,.0f}</p>
+    st.markdown("""
+    <div class="info-box">
+    <h3>🎯 What does this app do?</h3>
+    <p>This AI-powered application predicts your annual medical insurance costs based on your personal health profile. 
+    It uses advanced machine learning algorithms trained on real insurance data to provide accurate cost estimates.</p>
+    <p><strong>📊 Data Source:</strong> Real medical insurance dataset with comprehensive health and demographic factors.</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Model comparison chart
-    models = list(model_results.keys())
-    r2_scores = [model_results[model]['r2'] for model in models]
+    # Load data
+    with st.spinner('📊 Loading insurance data...'):
+        data = load_insurance_data()
     
-    fig = px.bar(
-        x=models, 
-        y=r2_scores,
-        title="🔍 Model Performance Comparison",
-        labels={'x': 'Model', 'y': 'R² Score (Accuracy)'},
-        color=r2_scores,
-        color_continuous_scale='viridis'
-    )
-    fig.update_layout(height=300, showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
+    if data is None:
+        st.stop()
+    
+    # Preprocess data
+    with st.spinner('🔧 Preprocessing data...'):
+        X, y, label_encoders = preprocess_data(data)
+    
+    if X is None:
+        st.stop()
+    
+    # Train models
+    with st.spinner('🤖 Training AI models...'):
+        model_info, scaler = train_models(X, y)
+    
+    if model_info is None:
+        st.stop()
+    
+    # Sidebar for user inputs
+    st.sidebar.markdown('<h2 style="color: #1f77b4;">📝 Enter Your Information</h2>', unsafe_allow_html=True)
+    
+    # Personal Details Section
+    st.sidebar.markdown("### 👤 Personal Details")
+    age = st.sidebar.slider("🎂 Age", 18, 65, 30, help="Your current age in years")
+    sex = st.sidebar.selectbox("👤 Gender", options=data['sex'].unique(), help="Your gender")
+    
+    # Health Information Section
+    st.sidebar.markdown("### 🏥 Health Information")
+    bmi = st.sidebar.slider("⚖️ BMI (Body Mass Index)", 15.0, 50.0, 25.0, 0.1, 
+                           help="BMI = weight(kg) / height(m)²")
+    
+    # BMI interpretation
+    bmi_category, bmi_color = get_bmi_category(bmi)
+    st.sidebar.markdown(f"**BMI Category:** :{bmi_color}[{bmi_category}]")
+    
+    smoker = st.sidebar.selectbox("🚭 Smoking Status", options=data['smoker'].unique(), 
+                                 help="Do you currently smoke?")
+    
+    # Family & Location Section
+    st.sidebar.markdown("### 👨‍👩‍👧‍👦 Family & Location")
+    children = st.sidebar.selectbox("👶 Number of Children", options=sorted(data['children'].unique()),
+                                   help="Number of dependent children covered by insurance")
+    region = st.sidebar.selectbox("🌎 Region", options=data['region'].unique(),
+                                 help="Your geographical region")
+    
+    # Display data summary in sidebar
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(f"""
+    <div class="sidebar-info">
+    <h4>📊 Dataset Summary</h4>
+    <p><strong>Total Records:</strong> {len(data):,}</p>
+    <p><strong>Average Cost:</strong> ${data['expenses'].mean():,.0f}</p>
+    <p><strong>Age Range:</strong> {data['age'].min()}-{data['age'].max()} years</p>
+    <p><strong>BMI Range:</strong> {data['bmi'].min():.1f}-{data['bmi'].max():.1f}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Make prediction
+    try:
+        # Encode categorical inputs
+        sex_encoded = label_encoders['sex'].transform([sex])[0]
+        smoker_encoded = label_encoders['smoker'].transform([smoker])[0]
+        region_encoded = label_encoders['region'].transform([region])[0]
+        
+        # Prepare input for prediction
+        user_input = np.array([[age, bmi, children, sex_encoded, smoker_encoded, region_encoded]])
+        user_input_scaled = scaler.transform(user_input)
+        
+        # Get predictions from all models
+        predictions = {}
+        for model_name, model in model_info['models'].items():
+            pred = model.predict(user_input_scaled)[0]
+            predictions[model_name] = pred
+        
+        # Ensemble prediction
+        ensemble_pred = (0.3 * predictions['Linear Regression'] + 
+                        0.3 * predictions['Random Forest'] + 
+                        0.4 * predictions['Gradient Boosting'])
+        predictions['Ensemble'] = ensemble_pred
+        
+        # Main prediction display
+        st.markdown('<h2 class="sub-header">🎯 Your Insurance Cost Prediction</h2>', unsafe_allow_html=True)
+        
+        # Best model prediction
+        best_model = model_info['best_model']
+        if best_model != 'Ensemble':
+            final_prediction = predictions[best_model]
+        else:
+            final_prediction = ensemble_pred
+        
+        # Display metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                label="💰 Predicted Annual Cost", 
+                value=f"${final_prediction:,.0f}",
+                help=f"Based on {best_model} model"
+            )
+        
+        with col2:
+            avg_cost = data['expenses'].mean()
+            diff = final_prediction - avg_cost
+            st.metric(
+                label="📊 vs Dataset Average", 
+                value=f"${avg_cost:,.0f}", 
+                delta=f"{diff:+,.0f}",
+                help="Comparison with dataset average"
+            )
+        
+        with col3:
+            monthly_cost = final_prediction / 12
+            st.metric(
+                label="📅 Monthly Premium", 
+                value=f"${monthly_cost:,.0f}",
+                help="Estimated monthly cost"
+            )
+        
+        with col4:
+            percentile = (data['expenses'] < final_prediction).mean() * 100
+            st.metric(
+                label="📈 Cost Percentile", 
+                value=f"{percentile:.0f}%",
+                help="Your cost compared to others in dataset"
+            )
+        
+        # Model performance section
+        st.markdown('<h2 class="sub-header">🤖 Model Performance</h2>', unsafe_allow_html=True)
+        
+        perf_col1, perf_col2 = st.columns([1, 1])
+        
+        with perf_col1:
+            # Model comparison
+            model_names = list(model_info['results'].keys())
+            r2_scores = [model_info['results'][name]['r2'] for name in model_names]
+            
+            fig = px.bar(
+                x=model_names, 
+                y=r2_scores,
+                title="🔍 Model Accuracy Comparison (R² Score)",
+                labels={'x': 'Model', 'y': 'R² Score'},
+                color=r2_scores,
+                color_continuous_scale='viridis',
+                text=[f"{score:.3f}" for score in r2_scores]
+            )
+            fig.update_traces(textposition='outside')
+            fig.update_layout(height=400, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with perf_col2:
+            # Best model info
+            best_r2 = model_info['results'][best_model]['r2']
+            best_rmse = model_info['results'][best_model]['rmse']
+            
+            st.markdown(f"""
+            <div class="success-box">
+            <h4>🏆 Best Performing Model</h4>
+            <p><strong>Model:</strong> {best_model}</p>
+            <p><strong>Accuracy (R²):</strong> {best_r2:.3f}</p>
+            <p><strong>RMSE:</strong> ${best_rmse:,.0f}</p>
+            <p><strong>Interpretation:</strong> {best_r2*100:.1f}% of cost variation explained</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # All model predictions
+            st.markdown("#### 🔮 All Model Predictions")
+            for model_name, pred in predictions.items():
+                st.write(f"**{model_name}:** ${pred:,.0f}")
+        
+        # Cost factor analysis
+        st.markdown('<h2 class="sub-header">📈 Cost Factor Analysis</h2>', unsafe_allow_html=True)
+        
+        # Interactive analysis
+        analysis_tab1, analysis_tab2, analysis_tab3, analysis_tab4 = st.tabs([
+            "🎂 Age Impact", "⚖️ BMI Impact", "🚭 Smoking Impact", "🌎 Regional Comparison"
+        ])
+        
+        with analysis_tab1:
+            # Age impact analysis
+            age_range = range(18, 66, 2)
+            age_costs = []
+            
+            for test_age in age_range:
+                test_input = np.array([[test_age, bmi, children, sex_encoded, smoker_encoded, region_encoded]])
+                test_input_scaled = scaler.transform(test_input)
+                if best_model != 'Ensemble':
+                    cost = model_info['models'][best_model].predict(test_input_scaled)[0]
+                else:
+                    lr_pred = model_info['models']['Linear Regression'].predict(test_input_scaled)[0]
+                    rf_pred = model_info['models']['Random Forest'].predict(test_input_scaled)[0]
+                    gb_pred = model_info['models']['Gradient Boosting'].predict(test_input_scaled)[0]
+                    cost = 0.3 * lr_pred + 0.3 * rf_pred + 0.4 * gb_pred
+                age_costs.append(cost)
+            
+            fig = px.line(
+                x=list(age_range), 
+                y=age_costs,
+                title=f"Insurance Cost vs Age (Your Profile)",
+                labels={'x': 'Age', 'y': 'Annual Cost ($)'},
+                line_shape='linear'
+            )
+            fig.add_vline(x=age, line_dash="dash", line_color="red", 
+                          annotation_text=f"Your Age ({age})")
+            fig.update_traces(line=dict(width=3))
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with analysis_tab2:
+            # BMI impact analysis
+            bmi_range = np.arange(18, 45, 1)
+            bmi_costs = []
+            
+            for test_bmi in bmi_range:
+                test_input = np.array([[age, test_bmi, children, sex_encoded, smoker_encoded, region_encoded]])
+                test_input_scaled = scaler.transform(test_input)
+                if best_model != 'Ensemble':
+                    cost = model_info['models'][best_model].predict(test_input_scaled)[0]
+                else:
+                    lr_pred = model_info['models']['Linear Regression'].predict(test_input_scaled)[0]
+                    rf_pred = model_info['models']['Random Forest'].predict(test_input_scaled)[0]
+                    gb_pred = model_info['models']['Gradient Boosting'].predict(test_input_scaled)[0]
+                    cost = 0.3 * lr_pred + 0.3 * rf_pred + 0.4 * gb_pred
+                bmi_costs.append(cost)
+            
+            fig = px.line(
+                x=list(bmi_range), 
+                y=bmi_costs,
+                title="Insurance Cost vs BMI (Your Profile)",
+                labels={'x': 'BMI', 'y': 'Annual Cost ($)'}
+            )
+            fig.add_vline(x=bmi, line_dash="dash", line_color="red", 
+                          annotation_text=f"Your BMI ({bmi:.1f})")
+            fig.add_vline(x=25, line_dash="dot", line_color="orange", 
+                          annotation_text="Overweight (25)")
+            fig.add_vline(x=30, line_dash="dot", line_color="red", 
+                          annotation_text="Obese (30)")
+            fig.update_traces(line=dict(width=3))
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with analysis_tab3:
+            # Smoking impact
+            smoking_options = data['smoker'].unique()
+            smoking_costs = []
+            smoking_labels = []
+            
+            for smoke_status in smoking_options:
+                smoke_encoded = label_encoders['smoker'].transform([smoke_status])[0]
+                test_input = np.array([[age, bmi, children, sex_encoded, smoke_encoded, region_encoded]])
+                test_input_scaled = scaler.transform(test_input)
+                if best_model != 'Ensemble':
+                    cost = model_info['models'][best_model].predict(test_input_scaled)[0]
+                else:
+                    lr_pred = model_info['models']['Linear Regression'].predict(test_input_scaled)[0]
+                    rf_pred = model_info['models']['Random Forest'].predict(test_input_scaled)[0]
+                    gb_pred = model_info['models']['Gradient Boosting'].predict(test_input_scaled)[0]
+                    cost = 0.3 * lr_pred + 0.3 * rf_pred + 0.4 * gb_pred
+                smoking_costs.append(cost)
+                smoking_labels.append(smoke_status.title())
+            
+            fig = px.bar(
+                x=smoking_labels, 
+                y=smoking_costs,
+                title="Cost Impact of Smoking Status",
+                labels={'x': 'Smoking Status', 'y': 'Annual Cost ($)'},
+                color=smoking_costs,
+                color_continuous_scale='Reds',
+                text=[f"${cost:,.0f}" for cost in smoking_costs]
+            )
+            fig.update_traces(textposition='outside')
+            st.plotly_chart(fig, use_container_width=True)
+            
+            if len(smoking_costs) == 2:
+                diff = max(smoking_costs) - min(smoking_costs)
+                pct_increase = (diff / min(smoking_costs)) * 100
+                st.info(f"💡 **Smoking Impact:** Increases cost by ${diff:,.0f} ({pct_increase:.0f}% increase)")
+        
+        with analysis_tab4:
+            # Regional comparison
+            regions = data['region'].unique()
+            region_costs = []
+            
+            for test_region in regions:
+                region_enc = label_encoders['region'].transform([test_region])[0]
+                test_input = np.array([[age, bmi, children, sex_encoded, smoker_encoded, region_enc]])
+                test_input_scaled = scaler.transform(test_input)
+                if best_model != 'Ensemble':
+                    cost = model_info['models'][best_model].predict(test_input_scaled)[0]
+                else:
+                    lr_pred = model_info['models']['Linear Regression'].predict(test_input_scaled)[0]
+                    rf_pred = model_info['models']['Random Forest'].predict(test_input_scaled)[0]
+                    gb_pred = model_info['models']['Gradient Boosting'].predict(test_input_scaled)[0]
+                    cost = 0.3 * lr_pred + 0.3 * rf_pred + 0.4 * gb_pred
+                region_costs.append(cost)
+            
+            fig = px.bar(
+                x=regions, 
+                y=region_costs,
+                title="Insurance Costs by Region (Your Profile)",
+                labels={'x': 'Region', 'y': 'Annual Cost ($)'},
+                color=region_costs,
+                color_continuous_scale='Blues',
+                text=[f"${cost:,.0f}" for cost in region_costs]
+            )
+            fig.update_traces(textposition='outside')
+            
+            # Highlight user's region
+            user_region_idx = list(regions).index(region)
+            fig.add_annotation(
+                x=user_region_idx, 
+                y=region_costs[user_region_idx] + 500,
+                text="Your Region", 
+                showarrow=True, 
+                arrowhead=2,
+                arrowcolor="red",
+                font=dict(color="red", size=12)
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Risk factors and recommendations
+        st.markdown('<h2 class="sub-header">🎯 Risk Factors & Recommendations</h2>', unsafe_allow_html=True)
+        
+        risk_col1, risk_col2 = st.columns(2)
+        
+        with risk_col1:
+            st.markdown("### 🔴 High-Cost Risk Factors")
+            high_risks = []
+            
+            # Analyze user's risk factors
+            if smoker.lower() in ['yes', 'true', '1']:
+                high_risks.append("🚫 **Smoking**: Major cost driver")
+            if bmi > 30:
+                high_risks.append("⚖️ **Obesity**: BMI > 30 increases medical risks")
+            if age > 50:
+                high_risks.append("📈 **Age**: Healthcare costs typically increase with age")
+            
+            if high_risks:
+                for risk in high_risks:
+                    st.markdown(f"• {risk}")
+            else:
+                st.success("✅ No major high-cost risk factors detected!")
+        
+        with risk_col2:
+            st.markdown("### 🟢 Positive Health Factors")
+            positive_factors = []
+            
+            if smoker.lower() in ['no', 'false', '0']:
+                positive_factors.append("✅ **Non-smoker**: Significantly reduces costs")
+            if 18.5 <= bmi <= 25:
+                positive_factors.append("✅ **Healthy BMI**: Optimal weight range")
+            if age < 35:
+                positive_factors.append("✅ **Young Age**: Generally lower healthcare needs")
+            
+            for factor in positive_factors:
+                st.markdown(f"• {factor}")
+            
+            if not positive_factors:
+                st.info("💡 Consider lifestyle changes to reduce insurance costs")
+    
+    except Exception as e:
+        st.error(f"❌ Error making prediction: {str(e)}")
+        st.info("Please check your input values and try again.")
+    
+    # Footer
+    st.markdown("---")
+    st.markdown("""
+    <div class="warning-box">
+    <h3>📋 Important Disclaimers</h3>
+    <ul>
+    <li><strong>Educational Purpose:</strong> This prediction is for educational and informational purposes only</li>
+    <li><strong>Not Official Quote:</strong> For actual insurance quotes, please consult licensed insurance providers</li>
+    <li><strong>Model Limitations:</strong> Predictions are based on historical data and may not reflect current market conditions</li>
+    <li><strong>Individual Variation:</strong> Actual costs may vary based on specific policy terms, medical history, and other factors</li>
+    </ul>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if model_info:
+        best_r2 = model_info['results'][model_info['best_model']]['r2']
+        best_rmse = model_info['results'][model_info['best_model']]['rmse']
+        
+        st.markdown(f"""
+        **🔬 Technical Details:**
+        - **Best Model:** {model_info['best_model']} (R² = {best_r2:.3f})
+        - **Dataset Size:** {len(data):,} insurance records
+        - **Model Accuracy:** {best_r2*100:.1f}% of cost variation explained
+        - **Prediction Error (RMSE):** ${best_rmse:,.0f}
+        - **Features Used:** Age, BMI, Children, Gender, Smoking Status, Region
+        
+        Made with ❤️ using Streamlit, scikit-learn, and Plotly | Data Source: Medical Insurance Dataset
+        """)
 
-# Risk factor analysis
-st.markdown('<h2 class="sub-header">⚠️ Cost Factors Analysis</h2>', unsafe_allow_html=True)
-
-risk_cols = st.columns(2)
-
-with risk_cols[0]:
-    st.markdown("### 🔴 High Cost Factors")
-    high_risk_factors = []
-    
-    if smoker == "Yes":
-        high_risk_factors.append("🚫 **Smoking**: Major cost driver (+130% increase)")
-    if bmi > 30:
-        high_risk_factors.append("⚖️ **Obesity**: Higher medical risks")
-    if age > 50:
-        high_risk_factors.append("📈 **Age**: Healthcare costs increase with age")
-    if region == "Southeast":
-        high_risk_factors.append("🏥 **Southeast Region**: Higher healthcare costs")
-    
-    if high_risk_factors:
-        for factor in high_risk_factors:
-            st.markdown(f"• {factor}")
-    else:
-        st.success("✅ No major high-cost risk factors detected!")
-
-with risk_cols[1]:
-    st.markdown("### 🟢 Cost-Saving Factors")
-    low_risk_factors = []
-    
-    if smoker == "No":
-        low_risk_factors.append("✅ **Non-smoker**: Significantly lower costs")
-    if 18.5 <= bmi <= 25:
-        low_risk_factors.append("✅ **Healthy BMI**: Optimal weight range")
-    if age < 30:
-        low_risk_factors.append("✅ **Young Age**: Lower healthcare needs")
-    if children == 0:
-        low_risk_factors.append("✅ **No Dependents**: Lower family coverage costs")
-    
-    for factor in low_risk_factors:
-        st.markdown(f"• {factor}")
-
-# Interactive analysis charts
-st.markdown('<h2 class="sub-header">📈 Interactive Cost Analysis</h2>', unsafe_allow_html=True)
-
-analysis_tabs = st.tabs(["Age Impact", "BMI Impact", "Smoking Impact", "Regional Comparison"])
-
-with analysis_tabs[0]:
-    st.markdown("#### How does age affect your insurance cost?")
-    ages_range = range(18, 66, 2)
-    costs_by_age = []
-    
-    for test_age in ages_range:
-        test_input = np.array([[test_age, sex_encoded, bmi, children_capped, smoker_encoded, region_encoded]])
-        test_input_scaled = scaler.transform(test_input)
-        pred1_age = model_results['Linear Regression']['model'].predict(test_input_scaled)[0]
-        pred2_age = model_results['Random Forest']['model'].predict(test_input_scaled)[0]
-        pred3_age = model_results['Gradient Boosting']['model'].predict(test_input_scaled)[0]
-        cost = 0.2*pred1_age + 0.3*pred2_age + 0.5*pred3_age
-        costs_by_age.append(cost)
-    
-    fig = px.line(
-        x=ages_range, 
-        y=costs_by_age,
-        title=f"Insurance Cost vs Age ({'Smoker' if smoker == 'Yes' else 'Non-Smoker'}, {sex})",
-        labels={'x': 'Age', 'y': 'Annual Cost ($)'}
-    )
-    fig.add_vline(x=age, line_dash="dash", line_color="red", 
-                  annotation_text="Your Age")
-    fig.update_traces(line=dict(width=3))
-    st.plotly_chart(fig, use_container_width=True)
-
-with analysis_tabs[1]:
-    st.markdown("#### How does BMI affect your insurance cost?")
-    bmi_range = np.arange(18, 45, 1)
-    costs_by_bmi = []
-    
-    for test_bmi in bmi_range:
-        test_input = np.array([[age, sex_encoded, test_bmi, children_capped, smoker_encoded, region_encoded]])
-        test_input_scaled = scaler.transform(test_input)
-        pred1_bmi = model_results['Linear Regression']['model'].predict(test_input_scaled)[0]
-        pred2_bmi = model_results['Random Forest']['model'].predict(test_input_scaled)[0]
-        pred3_bmi = model_results['Gradient Boosting']['model'].predict(test_input_scaled)[0]
-        cost = 0.2*pred1_bmi + 0.3*pred2_bmi + 0.5*pred3_bmi
-        costs_by_bmi.append(cost)
-    
-    fig = px.line(
-        x=bmi_range, 
-        y=costs_by_bmi,
-        title="Insurance Cost vs BMI",
-        labels={'x': 'BMI', 'y': 'Annual Cost ($)'}
-    )
-    fig.add_vline(x=bmi, line_dash="dash", line_color="red", 
-                  annotation_text="Your BMI")
-    fig.add_vline(x=25, line_dash="dot", line_color="orange", 
-                  annotation_text="Overweight Threshold")
-    fig.add_vline(x=30, line_dash="dot", line_color="red", 
-                  annotation_text="Obese Threshold")
-    fig.update_traces(line=dict(width=3))
-    st.plotly_chart(fig, use_container_width=True)
-
-with analysis_tabs[2]:
-    st.markdown("#### Smoking vs Non-Smoking Cost Comparison")
-    
-    # Non-smoker prediction
-    nonsmoker_input = np.array([[age, sex_encoded, bmi, children_capped, 1, region_encoded]])
-    nonsmoker_input_scaled = scaler.transform(nonsmoker_input)
-    nonsmoker_pred1 = model_results['Linear Regression']['model'].predict(nonsmoker_input_scaled)[0]
-    nonsmoker_pred2 = model_results['Random Forest']['model'].predict(nonsmoker_input_scaled)[0]
-    nonsmoker_pred3 = model_results['Gradient Boosting']['model'].predict(nonsmoker_input_scaled)[0]
-    nonsmoker_cost = 0.2*nonsmoker_pred1 + 0.3*nonsmoker_pred2 + 0.5*nonsmoker_pred3
-    
-    # Smoker prediction
-    smoker_input = np.array([[age, sex_encoded, bmi, children_capped, 2, region_encoded]])
-    smoker_input_scaled = scaler.transform(smoker_input)
-    smoker_pred1 = model_results['Linear Regression']['model'].predict(smoker_input_scaled)[0]
-    smoker_pred2 = model_results['Random Forest']['model'].predict(smoker_input_scaled)[0]
-    smoker_pred3 = model_results['Gradient Boosting']['model'].predict(smoker_input_scaled)[0]
-    smoker_cost = 0.2*smoker_pred1 + 0.3*smoker_pred2 + 0.5*smoker_pred3
-    
-    smoking_comparison = pd.DataFrame({
-        'Status': ['Non-Smoker', 'Smoker'],
-        'Annual Cost': [nonsmoker_cost, smoker_cost]
-    })
-    
-    fig = px.bar(smoking_comparison, x='Status', y='Annual Cost',
-                 title="Cost Difference: Smoking vs Non-Smoking",
-                 color='Annual Cost', color_continuous_scale='Reds')
-    
-    # Add difference annotation
-    difference = smoker_cost - nonsmoker_cost
-    fig.add_annotation(x=0.5, y=max(nonsmoker_cost, smoker_cost) * 0.8,
-                      text=f"Difference: ${difference:,.0f}<br>({difference/nonsmoker_cost*100:.0f}% increase)",
-                      showarrow=True, arrowhead=2)
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-with analysis_tabs[3]:
-    st.markdown("#### Cost Comparison Across Regions")
-    regions_analysis = ['Northeast', 'Northwest', 'Southeast', 'Southwest']
-    region_costs = []
-    
-    for test_region in regions_analysis:
-        region_code = {"Northeast": 1, "Northwest": 1, "Southeast": 2, "Southwest": 1}[test_region]
-        test_input = np.array([[age, sex_encoded, bmi, children_capped, smoker_encoded, region_code]])
-        test_input_scaled = scaler.transform(test_input)
-        pred1_reg = model_results['Linear Regression']['model'].predict(test_input_scaled)[0]
-        pred2_reg = model_results['Random Forest']['model'].predict(test_input_scaled)[0]
-        pred3_reg = model_results['Gradient Boosting']['model'].predict(test_input_scaled)[0]
-        cost = 0.2*pred1_reg + 0.3*pred2_reg + 0.5*pred3_reg
-        region_costs.append(cost)
-    
-    regional_df = pd.DataFrame({
-        'Region': regions_analysis,
-        'Annual Cost': region_costs
-    })
-    
-    fig = px.bar(regional_df, x='Region', y='Annual Cost',
-                 title="Insurance Costs by Region",
-                 color='Annual Cost', color_continuous_scale='Blues')
-    
-    # Highlight user's region
-    user_region_idx = regions_analysis.index(region)
-    fig.add_annotation(x=user_region_idx, y=region_costs[user_region_idx],
-                      text="Your Region", showarrow=True, arrowhead=2,
-                      arrowcolor="red")
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-# Dataset insights
-st.markdown('<h2 class="sub-header">📊 Dataset Insights</h2>', unsafe_allow_html=True)
-
-insight_cols = st.columns(3)
-
-with insight_cols[0]:
-    st.markdown("### Key Statistics")
-    st.write(f"**Total Records:** {len(original_data):,}")
-    st.write(f"**Average Cost:** ${original_data['expenses'].mean():,.0f}")
-    st.write(f"**Median Cost:** ${original_data['expenses'].median():,.0f}")
-    st.write(f"**Cost Range:** ${original_data['expenses'].min():,.0f} - ${original_data['expenses'].max():,.0f}")
-
-with insight_cols[1]:
-    st.markdown("### Demographics")
-    smoker_pct = (len(original_data[original_data['smoker'] == 2]) / len(original_data)) * 100
-    male_pct = (len(original_data[original_data['sex'] == 2]) / len(original_data)) * 100
-    st.write(f"**Smokers:** {smoker_pct:.1f}%")
-    st.write(f"**Males:** {male_pct:.1f}%")
-    st.write(f"**Average Age:** {original_data['age'].mean():.1f} years")
-    st.write(f"**Average BMI:** {original_data['bmi'].mean():.1f}")
-
-with insight_cols[2]:
-    st.markdown("### Cost Factors")
-    # Calculate average costs for different groups
-    smoker_avg = original_data[original_data['smoker'] == 2]['expenses'].mean()
-    nonsmoker_avg = original_data[original_data['smoker'] == 1]['expenses'].mean()
-    st.write(f"**Smoker Avg:** ${smoker_avg:,.0f}")
-    st.write(f"**Non-smoker Avg:** ${nonsmoker_avg:,.0f}")
-    st.write(f"**Smoking Premium:** {((smoker_avg/nonsmoker_avg - 1) * 100):.0f}%")
-
-# Footer with disclaimers and information
-st.markdown("---")
-st.markdown("""
-<div class="warning-box">
-<h3>📋 Important Disclaimers</h3>
-<ul>
-<li><strong>Educational Purpose:</strong> This prediction is for educational and informational purposes only</li>
-<li><strong>Not Official Quote:</strong> For actual insurance quotes, please consult licensed insurance providers</li>
-<li><strong>Model Accuracy:</strong> Predictions are based on machine learning analysis with {:.1f}% accuracy</li>
-<li><strong>Individual Variation:</strong> Actual costs may vary based on specific policy terms and conditions</li>
-</ul>
-</div>
-""".format(best_r2 * 100), unsafe_allow_html=True)
-
-st.markdown(f"""
-**🔬 Technical Details:**
-- **Models Used:** Linear Regression, Random Forest, Gradient Boosting
-- **Final Model:** Weighted Average (20% Linear + 30% Random Forest + 50% Gradient Boosting)
-- **Training Data:** {len(original_data):,} insurance records
-- **Model Accuracy:** R² = {best_r2:.3f}, RMSE = ${best_rmse:,.0f}
-- **Preprocessing:** Feature encoding, standardization, children capping (4,5 → 3)
-
-Made with ❤️ using Streamlit and scikit-learn
-""")
+if __name__ == "__main__":
+    main()
