@@ -330,19 +330,22 @@ def main():
         else:
             final_prediction = ensemble_pred
         
-        # Display metrics
+        # Display metrics with enhanced styling
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric(
-                label="💰 Predicted Annual Cost", 
-                value=f"${final_prediction:,.0f}",
-                help=f"Based on {best_model} model"
-            )
+            st.markdown(f"""
+            <div class="prediction-highlight">
+            <h2>${final_prediction:,.0f}</h2>
+            <p><strong>💰 Predicted Annual Cost</strong></p>
+            <small>Based on {best_model} model</small>
+            </div>
+            """, unsafe_allow_html=True)
         
         with col2:
             avg_cost = data['expenses'].mean()
             diff = final_prediction - avg_cost
+            diff_color = "🔴" if diff > 0 else "🟢"
             st.metric(
                 label="📊 vs Dataset Average", 
                 value=f"${avg_cost:,.0f}", 
@@ -360,8 +363,9 @@ def main():
         
         with col4:
             percentile = (data['expenses'] < final_prediction).mean() * 100
+            percentile_emoji = "📈" if percentile > 50 else "📉"
             st.metric(
-                label="📈 Cost Percentile", 
+                label=f"{percentile_emoji} Cost Percentile", 
                 value=f"{percentile:.0f}%",
                 help="Your cost compared to others in dataset"
             )
