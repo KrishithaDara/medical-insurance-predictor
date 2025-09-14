@@ -46,5 +46,5 @@ This project predicts individual medical expenses using machine learning models 
 
 ```bash
 pip install pandas numpy matplotlib seaborn scikit-learn
-jupyter notebook medical_expenses_prediction.ipynb
+jupyter notebook Medical_Expenses_Prediction.ipynb
 ```
